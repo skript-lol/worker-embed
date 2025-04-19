@@ -2,6 +2,7 @@ import React from "react";
 import { ImageResponse } from "@cloudflare/pages-plugin-vercel-og/api";
 import { Parser } from "html-to-react";
 import { marked, RendererObject } from "marked";
+import { Buffer } from 'node:buffer';
 
 // satori doesn't support headings/strong/em/code it seems?
 const renderer = {
@@ -24,13 +25,27 @@ const renderer = {
 
 marked.use({ renderer });
 
+async function getImageUrl(url: URL, env: Env) {
+	if (url.searchParams.has('image')) {
+		return `url(${url.searchParams.get('image')})`;
+	}
+
+	const asset = new URL('/bg_embed_2.png', url);
+	const file = await env.ASSETS.fetch(asset);
+
+	const arrayBuffer = await file.arrayBuffer();
+	const base64 = Buffer.from(arrayBuffer).toString('base64');
+
+	return `url("data:image/png;base64,${base64}")`;
+}
+
 export default {
 	async fetch(request, env, ctx): Promise<Response> {
 		const url = new URL(request.url);
 		const parser = Parser();
 
 		if (url.pathname.startsWith('/api/og')) {
-            const image = url.searchParams.get('image') ?? new URL("/discord_embed_background.png", url).href;
+            const image = await getImageUrl(url, env);
 			const text = await marked((url.searchParams.get('text') ?? ''), { gfm: true, breaks: true });
 			const parsed = parser.parse(text);
 			
@@ -39,7 +54,7 @@ export default {
 					style={{
 						display: 'flex',
 						color: 'white',
-						background: `url(${image})`,
+						background: image,
 						backgroundRepeat: 'no-repeat',
 						backgroundSize: '100% 100%',
 						width: '100%',
