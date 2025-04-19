@@ -1,8 +1,9 @@
 import React from "react";
 import { ImageResponse } from "@cloudflare/pages-plugin-vercel-og/api";
-import { Parser } from "html-to-react";
 import { marked, RendererObject } from "marked";
 import { Buffer } from 'node:buffer';
+import parse from 'html-react-parser';
+import * as cheerio from 'cheerio';
 
 // satori doesn't support headings/strong/em/code it seems?
 const renderer = {
@@ -12,18 +13,34 @@ const renderer = {
 	},
 	strong({ tokens }) {
 		const text = this.parser.parseInline(tokens);
-		return `<span style="font-text: bold;">${text}</span>`;
+		return `<span style="font-weight: bold;">${text}</span>`;
 	},
 	em({ tokens }) {
 		const text = this.parser.parseInline(tokens);
 		return `<span style="font-style: italic;">${text}</span>`;
 	},
 	codespan({ text }) {
-		return `<span style="background: #2b2b2b; padding: 2px 4px; border-radius: 5px;">${text}</span>`;
-	}
+		return `<div style="background: #2b2b2b; padding: 2px 4px; border-radius: 5px;">${text}</div>`;
+	},
+	blockquote({ text }) {
+		return `<span><div style="background: #2b2b2b; width: 8px; height: 100%; margin-right: 10px;"></div> ${text}</span>`;
+	},
 } satisfies RendererObject;
 
 marked.use({ renderer });
+
+async function fetchAsset(asset: URL, env: Env) {
+	const file = await env.ASSETS.fetch(asset);
+
+	if (!file.ok) {
+		return ``;
+	}
+
+	const arrayBuffer = await file.arrayBuffer();
+	const base64 = Buffer.from(arrayBuffer).toString('base64');
+
+	return `data:image/png;base64,${base64}`;
+}
 
 async function getImageUrl(url: URL, env: Env) {
 	if (url.searchParams.has('image')) {
@@ -31,30 +48,38 @@ async function getImageUrl(url: URL, env: Env) {
 	}
 
 	const asset = new URL('/bg_embed_2.png', url);
-	const file = await env.ASSETS.fetch(asset);
-
-	const arrayBuffer = await file.arrayBuffer();
-	const base64 = Buffer.from(arrayBuffer).toString('base64');
-
-	return `url("data:image/png;base64,${base64}")`;
+	const fetched = await fetchAsset(asset, env);
+	return `url("${fetched}")`;
 }
 
 export default {
 	async fetch(request, env, ctx): Promise<Response> {
 		const url = new URL(request.url);
-		const parser = Parser();
 
 		if (url.pathname.startsWith('/api/og')) {
-            const image = await getImageUrl(url, env);
-			const text = await marked((url.searchParams.get('text') ?? ''), { gfm: true, breaks: true });
-			const parsed = parser.parse(text);
+			const text = await marked(url.searchParams.get('text') ?? '', { gfm: true, breaks: true });
+
+			const $ = cheerio.load(text);
+			await Promise.all($('img')
+				.map(async (i, element) => {
+					const src = $(element).attr('src');
+					if (src && src.startsWith('/')) {
+						const fetchedSrc = await fetchAsset(new URL(src, url), env);
+						$(element).attr('src', fetchedSrc);
+					}
+				})
+				.get());
+			const html = $("body").html() ?? '';
+
+			const parsed = parse(html);
+			const imageUrl = await getImageUrl(url, env);
 			
 			return new ImageResponse(
 				<div
 					style={{
 						display: 'flex',
 						color: 'white',
-						background: image,
+						background: imageUrl,
 						backgroundRepeat: 'no-repeat',
 						backgroundSize: '100% 100%',
 						width: '100%',
@@ -69,9 +94,6 @@ export default {
 				{
 					width: 1200,
 					height: 630,
-					headers: {
-						'Cache-Control': 'public, max-age=31536000, immutable'
-					}
 				}
 			);
 		} else if (url.pathname === '/robots.txt') {
