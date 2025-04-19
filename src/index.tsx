@@ -4,6 +4,7 @@ import { marked, RendererObject } from "marked";
 import { Buffer } from 'node:buffer';
 import parse from 'html-react-parser';
 import * as cheerio from 'cheerio';
+import { fonts } from "./fonts";
 
 // satori doesn't support headings/strong/em/code it seems?
 const renderer = {
@@ -94,6 +95,7 @@ export default {
 				{
 					width: 1200,
 					height: 630,
+					fonts
 				}
 			);
 		} else if (url.pathname === '/robots.txt') {
